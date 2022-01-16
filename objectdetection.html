@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>物体検出</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+<script>
+let canvas, context;            //キャンバス
+const image = new Image();      //画像
+let objectLabel = new Array();  //検出した物体のラベル
+
+const init = () => {
+    //キャンバス
+    canvas = document.getElementById("image");      //キャンバスを取得
+    context = canvas.getContext("2d");
+    //「検出」ボタンを無効化
+    document.getElementById("detectButton").disabled = true;    //「検出」ボタンを無効化
+}
+
+const loadImage = files => {    //「ファイルを選択」ボタンで読み込んだ画像ファイル
+   //画像の読み込み
+   image.src = URL.createObjectURL(files[0]);
+   image.onload = () => {
+       //画像を描画（縦横最大600ピクセル）
+       let width, height, size = 600;
+       if(image.width > image.height) { //画像の縦横のうち長い方を600pxとしもう一方を縦横比から計算
+           [width, height] = [size, image.height/image.width * size];
+       } else {
+           [width, height] = [image.width/image.height * size, size];
+       }
+       [canvas.width, canvas.height] = [width, height];
+       context.clearRect(0, 0, width, height);
+       context.drawImage(image, 0, 0, width, height);
+       //検出結果をクリア、「検出」ボタンを有効化
+       document.getElementById("list").innerHTML = "";  //検出結果表示エリアとメッセージをクリア
+       document.getElementById("message").innerText = "";
+       document.getElementById("detectButton").disabled = false;
+   }
+}
+
+const detect = () => {
+    //検出
+    const minScore = document.getElementById("min").value / 100;    //最少スコアの値を取得し100で割る
+    document.getElementById("list").innerHTML = "";
+    objectLabel = [];
+    const message = document.getElementById("message");
+    message.innerText = "検出中．．．";
+    cocoSsd.load().then(model => {  //Coco SSDの読み込みが成功した時
+       model.detect(canvas, 100, minScore).then(predictions => {    //物体を検出
+          for (let i=0; i<predictions.length; i++) {    //検出結果を1つずつ取り出して表示
+             addObject(predictions[i]);
+          }
+          message.innerText += "完了";
+          if(predictions.length == 0) {     //検出結果がなかったとき
+            message.innerText = "検出されませんでした。";
+          }
+        });
+    });
+}
+
+const addObject = prediction => {  //検出結果1つ分のデータ
+   //検出した物体のラベルを追加
+   if (objectLabel.indexOf(prediction.class) == -1) {  //初めて検出する物体の種類なら
+     objectLabel.push(prediction.class);               //配列objectLabelに追加
+     const label = document.createElement("div");
+     label.innerText = prediction.class;               //ラベルとして表示
+     label.className = "label";
+     document.getElementById("list").appendChild(label);
+     const object = document.createElement("div");      //検出した物体の種類をIDとしたdiv要素を追加
+     object.id = prediction.class;
+     document.getElementById("list").appendChild(object);
+   }
+   //検出した情報を取得
+   const [x, y, w, h] = prediction.bbox;                  //検出した物体の座標と大きさ
+   const scale = image.width / canvas.width;              //元画像の座標と大きさに変換
+   const [x1, y1, w1, h1] = [x * scale, y * scale, w * scale, h * scale];
+   const score = (prediction.score * 100).toFixed(2);     //検出されたスコア（小数点以下2ケタ表示）
+   //スコア
+   const div = document.createElement("div");             //div要素を作成し、クラス名をblockに
+   div.className = "block";
+   const scoreDiv = document.createElement("div");
+   scoreDiv.innerText = `(${score}%)`;                  //スコアを％表示
+   div.appendChild(scoreDiv);
+   //画像
+   const miniCanvas = document.createElement("canvas"); //検出した物体を表示するキャンバスを作成
+   const miniContext = miniCanvas.getContext("2d");
+   let w2, h2, size = 100;
+   if (w > h) {                         //検出した物体の縦横のうち長い方を100pxとし、もう一方を縦横比から計算
+      [w2, h2] = [size, h/w * size];
+   } else {
+       [w2, h2] = [w/h * size, size];
+   }
+   miniCanvas.width = w2;
+   miniCanvas.height = h2;
+   miniContext.drawImage(image, x1, y1, w1, h1, 0, 0, w2, h2);  //検出した物体の画像を表示
+   //マウスカーソルが入った時に検出した矩形を描画
+   miniCanvas.onmouseenter = () => {                            //画像にマウスカーソルを合わせた時
+      miniCanvas.classList.add("select");                       //selectクラスを追加
+      context.strokeStyle = "#00CCFF";                          //線の色は水色、線の太さは４
+      context.lineWidth = 4;
+      context.strokeRect(x, y, w, h);                           //読み込んだ画像の中で検出された物体を囲む
+   }
+   //マウスカーソルが出たときに矩形を消去
+   miniCanvas.onmouseleave = () => {                            //マウスカーソルが画像からはずれたとき
+      miniCanvas.classList.remove("select");
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);  //キャンバスに読み込んだ画像を再描画
+   }
+   div.appendChild(miniCanvas);
+   document.getElementById(prediction.class).appendChild(div);      //同じ物体の種類のdiv要素に追加
+}
+</script>
+<style>
+input[type="number"] {width: 40px;}
+#message {color: #009900;}
+canvas {border: 4px solid #CCCCCC;}
+#image {
+    float: left;
+    margin-right: 5px;
+}
+#list {
+    height: 600px;
+    overflow: auto;
+}
+.label {
+    padding-left: 5px;
+    color: #FFFFFF;
+    background-color: #0000FF;
+}
+.block {
+    display: inline-block;
+    margin: 0px 10px;
+    text-align: center;
+    vertical-align: top;
+}
+.select {border: 4px solid #00CCFF;}
+</style>
+</head>
+<body onload = "init()">
+<p>物体検出</p>
+<input type="file" accept="image/*" onchange="loadImage(this.files)">
+最少スコア：<input type="number" id="min" value="50" min="1" max="100">%
+<input type="button" id="detectButton" value="検出" onclick="detect()">
+<span id="message"></span>
+<hr>
+<canvas id="image"></canvas>
+<div id="list"></div> 
+</body>
+
+
